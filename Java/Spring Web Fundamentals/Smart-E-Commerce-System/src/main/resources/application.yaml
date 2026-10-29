@@ -3,6 +3,9 @@ spring:
     name: Smart-E-Commerce-System
   profiles:
     active: dev
+  app:
+    monitoring:
+      slow-threshold-ms: 500
 
   server:
     port: 8080
@@ -15,3 +18,7 @@ spring:
       display-request-duration: true
     api-docs:
       path: /v3/api-docs
+  graphql:
+    schema:
+      printer:
+        enabled: true

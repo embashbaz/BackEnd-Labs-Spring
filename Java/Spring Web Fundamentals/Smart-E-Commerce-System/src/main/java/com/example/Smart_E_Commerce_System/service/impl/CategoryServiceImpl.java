@@ -1,6 +1,5 @@
 package com.example.Smart_E_Commerce_System.service.impl;
 
-
 import com.example.Smart_E_Commerce_System.dto.PageResponse;
 import com.example.Smart_E_Commerce_System.dto.category.CategoryRequest;
 import com.example.Smart_E_Commerce_System.dto.category.CategoryResponse;
@@ -14,6 +13,10 @@ import com.example.Smart_E_Commerce_System.service.CategoryService;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.Collection;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional(readOnly = true)
@@ -50,6 +53,12 @@ public class CategoryServiceImpl implements CategoryService {
     @Override
     public PageResponse<CategoryResponse> getAll(Pageable pageable) {
         return PageResponse.from(categoryRepository.findAll(pageable).map(CategoryResponse::from));
+    }
+
+    @Override
+    public Map<Integer, CategoryResponse> getByIds(Collection<Integer> ids) {
+        return categoryRepository.findAllById(ids).stream()
+                .collect(Collectors.toMap(Category::getId, CategoryResponse::from));
     }
 
     @Override

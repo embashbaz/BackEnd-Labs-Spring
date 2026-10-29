@@ -1,0 +1,134 @@
+# Smart E-Commerce GraphQL schema.
+# Same services as the REST API, so business rules and validation are identical.
+
+type Query {
+    "Fetch one category by id"
+    category(id: ID!): Category
+    "Paginated, sortable list of categories"
+    categories(page: Int = 0, size: Int = 10, sortBy: String = "name", direction: SortDirection = ASC): CategoryPage!
+
+    "Fetch one product by id"
+    product(id: ID!): Product
+    "Search products: all filters optional and combined with AND"
+    products(filter: ProductFilterInput, page: Int = 0, size: Int = 10, sortBy: String = "id", direction: SortDirection = ASC): ProductPage!
+
+    "Fetch one user by id"
+    user(id: ID!): User
+    "Paginated list of users, optionally filtered by role"
+    users(role: Role, page: Int = 0, size: Int = 10, sortBy: String = "id", direction: SortDirection = ASC): UserPage!
+}
+
+type Mutation {
+    createCategory(input: CategoryInput!): Category!
+    updateCategory(id: ID!, input: CategoryInput!): Category!
+    "Fails if the category still has products"
+    deleteCategory(id: ID!): Boolean!
+
+    "Also creates the product's inventory row"
+    createProduct(input: ProductInput!): Product!
+    updateProduct(id: ID!, input: ProductInput!): Product!
+    "Fails if the product appears in any order"
+    deleteProduct(id: ID!): Boolean!
+
+    createUser(input: UserCreateInput!): User!
+    updateUser(id: ID!, input: UserUpdateInput!): User!
+    "Fails if the user has orders"
+    deleteUser(id: ID!): Boolean!
+}
+
+enum SortDirection { ASC DESC }
+enum Role { CUSTOMER ADMIN }
+
+# ---------- output types ----------
+type Category {
+    id: ID!
+    name: String!
+    description: String
+    "ISO-8601 timestamp"
+    createdAt: String!
+}
+
+type Product {
+    id: ID!
+    name: String!
+    description: String
+    price: Float!
+    "Resolved in one batched query per request (no N+1)"
+    category: Category!
+    createdAt: String!
+    updatedAt: String!
+}
+
+type User {
+    id: ID!
+    fullName: String!
+    email: String!
+    role: Role!
+    createdAt: String!
+}
+
+type CategoryPage {
+    content: [Category!]!
+    page: Int!
+    size: Int!
+    totalElements: Int!
+    totalPages: Int!
+    last: Boolean!
+}
+
+type ProductPage {
+    content: [Product!]!
+    page: Int!
+    size: Int!
+    totalElements: Int!
+    totalPages: Int!
+    last: Boolean!
+}
+
+type UserPage {
+    content: [User!]!
+    page: Int!
+    size: Int!
+    totalElements: Int!
+    totalPages: Int!
+    last: Boolean!
+}
+
+# ---------- input types (bound to the same DTOs REST uses) ----------
+input CategoryInput {
+    name: String!
+    description: String
+}
+
+input ProductInput {
+    categoryId: ID!
+    name: String!
+    description: String
+    price: Float!
+    "Used on create only"
+    initialStock: Int
+}
+
+input ProductFilterInput {
+    categoryId: ID
+    minPrice: Float
+    maxPrice: Float
+    "Case-insensitive partial match"
+    name: String
+}
+
+input UserCreateInput {
+    fullName: String!
+    email: String!
+    password: String!
+    "Defaults to CUSTOMER"
+    role: Role
+}
+
+input UserUpdateInput {
+    fullName: String!
+    email: String!
+    "Optional; only changed when provided"
+    password: String
+    role: Role!
+}
