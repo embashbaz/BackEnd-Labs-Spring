@@ -1,10 +1,11 @@
-package com.example.smartecommerce.controller;
+package com.example.Smart_E_Commerce_System.controller;
 
-import com.example.smartecommerce.dto.ApiResponse;
-import com.example.smartecommerce.dto.PageResponse;
-import com.example.smartecommerce.dto.category.CategoryRequest;
-import com.example.smartecommerce.dto.category.CategoryResponse;
-import com.example.smartecommerce.service.CategoryService;
+
+import com.example.Smart_E_Commerce_System.dto.ApiResponse;
+import com.example.Smart_E_Commerce_System.dto.PageResponse;
+import com.example.Smart_E_Commerce_System.dto.category.CategoryRequest;
+import com.example.Smart_E_Commerce_System.dto.category.CategoryResponse;
+import com.example.Smart_E_Commerce_System.service.CategoryService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
