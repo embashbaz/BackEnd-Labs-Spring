@@ -1,6 +1,7 @@
 package com.example.Smart_E_Commerce_System.dto.user;
 
 import com.example.Smart_E_Commerce_System.entity.Role;
+import com.example.Smart_E_Commerce_System.validation.EmailRules;
 import com.example.Smart_E_Commerce_System.validation.StrongPassword;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -14,7 +15,7 @@ public record UserUpdateRequest(
         String fullName,
 
         @NotBlank(message = "Email is required")
-        @Email(message = "Email must be a valid address")
+        @Email(regexp = EmailRules.REGEX, message = "Email must be a valid address (e.g. name@example.com)")
         @Size(max = 255, message = "Email must be at most 255 characters")
         String email,
 
