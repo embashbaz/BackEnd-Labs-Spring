@@ -8,4 +8,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface OrderRepository extends JpaRepository<Order, Integer> {
 
     Page<Order> findByUserId(Integer userId, Pageable pageable);
+
+    // Used before deleting a user (FK is ON DELETE RESTRICT)
+    boolean existsByUserId(Integer userId);
 }
