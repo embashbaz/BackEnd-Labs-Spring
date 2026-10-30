@@ -82,6 +82,11 @@ public class GlobalExceptionHandler {
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "An unexpected error occurred", null);
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException ex) {
+        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), null);
+    }
+
     private <T> ResponseEntity<ApiResponse<T>> build(HttpStatus status, String message, T data) {
         return ResponseEntity.status(status).body(ApiResponse.error(message, data));
     }
