@@ -1,6 +1,6 @@
 package com.example.Smart_E_Commerce_System.repository;
 
-import com.example.Smart_E_Commerce_System.dto.product.RatingSummary;
+import com.example.Smart_E_Commerce_System.dto.review.RatingSummary;
 import com.example.Smart_E_Commerce_System.entity.Review;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -20,7 +20,7 @@ public interface ReviewRepository extends JpaRepository<Review, Integer> {
 
     /** Average rating and review count; empty Optional if the product has no reviews. */
     @Query("""
-            select new com.example.Smart_E_Commerce_System.dto.product.RatingSummary(
+            select new com.example.Smart_E_Commerce_System.dto.review.RatingSummary(
                 r.product.id, avg(r.rating), count(r))
             from Review r
             where r.product.id = :productId

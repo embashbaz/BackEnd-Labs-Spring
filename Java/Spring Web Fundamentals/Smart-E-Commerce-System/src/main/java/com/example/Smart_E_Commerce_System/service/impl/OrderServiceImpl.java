@@ -1,19 +1,25 @@
 package com.example.Smart_E_Commerce_System.service.impl;
 
+import com.example.Smart_E_Commerce_System.dto.PageResponse; // ADJUST: your PageResponse package
 import com.example.Smart_E_Commerce_System.dto.order.CreateOrderRequest;
 import com.example.Smart_E_Commerce_System.dto.order.OrderItemRequest;
 import com.example.Smart_E_Commerce_System.dto.order.OrderItemResponse;
+import com.example.Smart_E_Commerce_System.dto.order.OrderListItemResponse;
 import com.example.Smart_E_Commerce_System.dto.order.OrderResponse;
+import com.example.Smart_E_Commerce_System.dto.order.OrderSummaryResponse;
 import com.example.Smart_E_Commerce_System.entity.Order;
 import com.example.Smart_E_Commerce_System.entity.OrderItem;
+import com.example.Smart_E_Commerce_System.entity.OrderStatus;
 import com.example.Smart_E_Commerce_System.entity.Product;
 import com.example.Smart_E_Commerce_System.entity.User;
-import com.example.Smart_E_Commerce_System.exception.ResourceNotFoundException; // ADJUST: your existing 404 exception
+import com.example.Smart_E_Commerce_System.exception.ResourceNotFoundException;
 import com.example.Smart_E_Commerce_System.repository.OrderRepository;
 import com.example.Smart_E_Commerce_System.repository.ProductRepository;
 import com.example.Smart_E_Commerce_System.repository.UserRepository;
 import com.example.Smart_E_Commerce_System.service.InventoryService;
 import com.example.Smart_E_Commerce_System.service.OrderService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
@@ -96,7 +102,35 @@ public class OrderServiceImpl implements OrderService {
     public OrderResponse getOrder(Integer orderId) {
         return orderRepository.findDetailById(orderId)
                 .map(this::toResponse)
-                .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
+                .orElseThrow(() -> new ResourceNotFoundException("Order",orderId));
+    }
+
+    /**
+     * A customer's order history. The query already returns DTOs (JPQL constructor
+     * expression), so there is nothing to map: just wrap the page.
+     * Checks the user first so an unknown user gives 404 instead of an empty page.
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<OrderSummaryResponse> getOrderHistory(Integer userId, Pageable pageable) {
+        if (!userRepository.existsById(userId)) {
+            throw new ResourceNotFoundException("User", userId);
+        }
+        return PageResponse.from(orderRepository.findOrderHistory(userId, pageable));
+    }
+
+    /** Admin list. findByStatus loads each order's user in the same query (@EntityGraph). */
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponse<OrderListItemResponse> getOrdersByStatus(OrderStatus status, Pageable pageable) {
+        Page<OrderListItemResponse> page = orderRepository.findByStatus(status, pageable)
+                .map(order -> new OrderListItemResponse(
+                        order.getId(),
+                        order.getUser().getId(),
+                        order.getUser().getFullName(),
+                        order.getOrderDate(),
+                        order.getStatus()));
+        return PageResponse.from(page);
     }
 
     private OrderResponse toResponse(Order order) {
