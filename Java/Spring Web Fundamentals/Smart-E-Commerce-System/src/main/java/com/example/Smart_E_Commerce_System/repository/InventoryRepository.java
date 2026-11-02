@@ -17,9 +17,4 @@ public interface InventoryRepository extends JpaRepository<Inventory, Integer> {
     @Query("select i from Inventory i where i.quantityOnHand <= i.reorderLevel")
     List<Inventory> findLowStock();
 
-    @EntityGraph(attributePaths = "category")
-    Page<Product> findByCategoryNameIgnoreCase(String categoryName, Pageable pageable);
-
-    @EntityGraph(attributePaths = "category")
-    Page<Product> findByPriceBetween(BigDecimal min, BigDecimal max, Pageable pageable);
 }

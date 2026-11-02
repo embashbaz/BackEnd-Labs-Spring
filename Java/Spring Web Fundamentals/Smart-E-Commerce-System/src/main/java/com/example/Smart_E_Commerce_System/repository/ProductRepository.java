@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -32,4 +33,10 @@ public interface ProductRepository extends JpaRepository<Product, Integer>,
 
     // Used before deleting a category (FK is ON DELETE RESTRICT)
     boolean existsByCategoryId(Integer categoryId);
+
+    @EntityGraph(attributePaths = "category")
+    Page<Product> findByCategoryNameIgnoreCase(String categoryName, Pageable pageable);
+
+    @EntityGraph(attributePaths = "category")
+    Page<Product> findByPriceBetween(BigDecimal min, BigDecimal max, Pageable pageable);
 }
