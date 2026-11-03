@@ -1,6 +1,7 @@
 package com.example.Smart_E_Commerce_System.service.impl;
 
 
+import com.example.Smart_E_Commerce_System.config.CacheNames;
 import com.example.Smart_E_Commerce_System.dto.PageResponse;
 import com.example.Smart_E_Commerce_System.dto.user.UserCreateRequest;
 import com.example.Smart_E_Commerce_System.dto.user.UserResponse;
@@ -13,6 +14,8 @@ import com.example.Smart_E_Commerce_System.exception.ResourceNotFoundException;
 import com.example.Smart_E_Commerce_System.repository.OrderRepository;
 import com.example.Smart_E_Commerce_System.repository.UserRepository;
 import com.example.Smart_E_Commerce_System.service.UserService;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -21,6 +24,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Locale;
 
+/**
+ * Caching: the user profile (getById) is cached per id and evicted on update/delete.
+ * The cached value is UserResponse, which has no password hash, so nothing sensitive is kept in memory.
+ * getAll is not cached (admin listing with role filter + paging; rarely repeated).
+ */
 @Service
 @Transactional(readOnly = true)
 public class UserServiceImpl implements UserService {
@@ -54,6 +62,7 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    @Cacheable(cacheNames = CacheNames.USERS, key = "#id")
     public UserResponse getById(Integer id) {
         return UserResponse.from(findOrThrow(id));
     }
@@ -68,6 +77,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = CacheNames.USERS, key = "#id")
     public UserResponse update(Integer id, UserUpdateRequest request) {
         User user = findOrThrow(id);
         String email = normalize(request.email());
@@ -85,6 +95,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
+    @CacheEvict(cacheNames = CacheNames.USERS, key = "#id")
     public void delete(Integer id) {
         User user = findOrThrow(id);
         if (orderRepository.existsByUserId(id)) {

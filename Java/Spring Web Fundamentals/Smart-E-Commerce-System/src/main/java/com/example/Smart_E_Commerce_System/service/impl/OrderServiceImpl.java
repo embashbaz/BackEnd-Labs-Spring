@@ -1,5 +1,6 @@
 package com.example.Smart_E_Commerce_System.service.impl;
 
+import com.example.Smart_E_Commerce_System.config.CacheNames;
 import com.example.Smart_E_Commerce_System.dto.PageResponse; // ADJUST: your PageResponse package
 import com.example.Smart_E_Commerce_System.dto.order.CreateOrderRequest;
 import com.example.Smart_E_Commerce_System.dto.order.OrderItemRequest;
@@ -18,6 +19,7 @@ import com.example.Smart_E_Commerce_System.repository.ProductRepository;
 import com.example.Smart_E_Commerce_System.repository.UserRepository;
 import com.example.Smart_E_Commerce_System.service.InventoryService;
 import com.example.Smart_E_Commerce_System.service.OrderService;
+import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -60,6 +62,7 @@ public class OrderServiceImpl implements OrderService {
      */
     @Override
     @Transactional(isolation = Isolation.READ_COMMITTED)
+    @CacheEvict(cacheNames = CacheNames.REPORTS, allEntries = true)
     public OrderResponse placeOrder(CreateOrderRequest request) {
         User user = userRepository.findById(request.userId())
                 .orElseThrow(() -> new ResourceNotFoundException("User", request.userId()));

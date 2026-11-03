@@ -1,6 +1,7 @@
 package com.example.Smart_E_Commerce_System.service.impl;
 
 
+import com.example.Smart_E_Commerce_System.config.CacheNames;
 import com.example.Smart_E_Commerce_System.dto.PageResponse;
 import com.example.Smart_E_Commerce_System.dto.product.ProductFilter;
 import com.example.Smart_E_Commerce_System.dto.product.ProductRequest;
@@ -15,10 +16,21 @@ import com.example.Smart_E_Commerce_System.repository.InventoryRepository;
 import com.example.Smart_E_Commerce_System.repository.ProductRepository;
 import com.example.Smart_E_Commerce_System.repository.spec.ProductSpecifications;
 import com.example.Smart_E_Commerce_System.service.ProductService;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Caching:
+ * - getById is cached per product id.
+ * - search is NOT cached: every filter/page/sort combination would be its own entry,
+ *   so few requests would ever hit the cache, and every product change would have to clear them all.
+ * - Any product change also clears the reports cache (top products show product names,
+ *   low stock depends on new products' initial stock).
+ */
 @Service
 @Transactional(readOnly = true)
 public class ProductServiceImpl implements ProductService {
@@ -35,8 +47,10 @@ public class ProductServiceImpl implements ProductService {
         this.inventoryRepository = inventoryRepository;
     }
 
+    // A new product has a new id, so nothing in the products cache can be stale.
     @Override
     @Transactional
+    @CacheEvict(cacheNames = CacheNames.REPORTS, allEntries = true)
     public ProductResponse create(ProductRequest request) {
         Product product = new Product();
         applyRequest(product, request);
@@ -51,7 +65,10 @@ public class ProductServiceImpl implements ProductService {
         return ProductResponse.from(saved);
     }
 
+    // First call for an id runs the method and stores the result; later calls return the stored copy.
+    // A not-found exception is not cached, so a product created later is found normally.
     @Override
+    @Cacheable(cacheNames = CacheNames.PRODUCTS, key = "#id")
     public ProductResponse getById(Integer id) {
         return ProductResponse.from(findOrThrow(id));
     }
@@ -67,8 +84,14 @@ public class ProductServiceImpl implements ProductService {
                         .map(ProductResponse::from));
     }
 
+    // Remove the old copy; the next getById loads the updated product.
+    // Eviction happens only if the method succeeds (a failed update changes nothing).
     @Override
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CacheNames.PRODUCTS, key = "#id"),
+            @CacheEvict(cacheNames = CacheNames.REPORTS, allEntries = true)
+    })
     public ProductResponse update(Integer id, ProductRequest request) {
         Product product = findOrThrow(id);
         applyRequest(product, request);
@@ -77,6 +100,10 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional
+    @Caching(evict = {
+            @CacheEvict(cacheNames = CacheNames.PRODUCTS, key = "#id"),
+            @CacheEvict(cacheNames = CacheNames.REPORTS, allEntries = true)
+    })
     public void delete(Integer id) {
         // Inventory row is removed by ON DELETE CASCADE in the DB.
         // Products already in orders are protected by ON DELETE RESTRICT -> 409 via handler.

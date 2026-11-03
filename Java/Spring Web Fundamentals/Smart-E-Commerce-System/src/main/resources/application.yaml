@@ -9,7 +9,9 @@ spring:
 
   server:
     port: 8080
-
+  cache:
+    type: simple
+    cache-names: products,categories,categoryLists,users,reports
   springdoc:
     swagger-ui:
       path: /swagger-ui.html
