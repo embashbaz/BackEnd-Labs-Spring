@@ -1,0 +1,20 @@
+Endpoint timings
+  label: before   run at: 2026-11-03T11:37:54
+  base url: http://localhost:8080   requests: 50 (after 5 warm-up)
+  test user id: 1362   test product id: 3153
+
+endpoint                   avg ms   min ms   p95 ms   max ms errors
+--------                   ------   ------   ------   ------ ------
+order-history                14.8      9.0     18.5     19.2      0
+orders-by-status             18.6     16.2     24.8     29.5      0
+product-reviews               2.5      1.9      3.4      4.6      0
+product-rating                1.4      1.1      1.7      1.9      0
+report-monthly-revenue      172.7    145.1    197.1    232.5      0
+report-top-products          64.6     60.5     68.2     68.7      0
+report-low-stock              2.5      1.8      3.8      4.8      0
+products-list                 2.5      2.2      2.9      3.2      0
+product-by-id                 1.2      1.0      1.5      1.6      0
+categories                    1.2      1.0      1.5      1.6      0
+user-by-id                    0.8      0.7      1.0      1.0      0
+
+Errors = responses that were not HTTP 200. Any non-zero value means that row's timing is not valid.
