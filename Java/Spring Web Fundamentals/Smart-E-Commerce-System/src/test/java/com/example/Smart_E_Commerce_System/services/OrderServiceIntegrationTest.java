@@ -5,10 +5,13 @@ import com.example.Smart_E_Commerce_System.dto.order.OrderItemRequest;
 import com.example.Smart_E_Commerce_System.dto.order.OrderResponse;
 import com.example.Smart_E_Commerce_System.entity.Category;
 import com.example.Smart_E_Commerce_System.entity.Inventory;
+import com.example.Smart_E_Commerce_System.entity.OrderStatus;
 import com.example.Smart_E_Commerce_System.entity.Product;
 import com.example.Smart_E_Commerce_System.entity.User;
 import com.example.Smart_E_Commerce_System.exception.InsufficientStockException;
-import com.example.Smart_E_Commerce_System.exception.ResourceNotFoundException; // ADJUST: your existing 404 exception
+import com.example.Smart_E_Commerce_System.exception.InvalidOrderStatusException;
+import com.example.Smart_E_Commerce_System.exception.PaymentDeclinedException;
+import com.example.Smart_E_Commerce_System.exception.ResourceNotFoundException;
 import com.example.Smart_E_Commerce_System.repository.*;
 import com.example.Smart_E_Commerce_System.service.InventoryService;
 import com.example.Smart_E_Commerce_System.service.OrderService;
@@ -32,10 +35,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * transaction proxies and a real database are involved.
  *
  * IMPORTANT: this class is deliberately NOT annotated with @Transactional.
- * If it were, placeOrder would join the test's transaction and its rollback would be
- * postponed until the test ends, so the stock checks below would see the reduced value
- * and fail even though the code is correct. Without it, each placeOrder call runs in its
- * own real transaction, exactly as it does when called from the controller.
+ * If it were, the service methods would join the test's transaction and their rollback would
+ * be postponed until the test ends, so the checks below would see the changed values and
+ * fail even though the code is correct. Without it, each service call runs in its own real
+ * transaction, exactly as it does when called from the controller.
  * The trade-off: data is created in @BeforeEach and deleted in @AfterEach by hand.
  */
 @SpringBootTest
@@ -83,7 +86,7 @@ class OrderServiceIntegrationTest {
         cleanDatabase();
     }
 
-    // ------------------------------------------------------------------ tests
+    // ============================================================ placing orders
 
     @Test
     @DisplayName("Valid order is saved and stock is reduced")
@@ -95,6 +98,7 @@ class OrderServiceIntegrationTest {
                 line(mouse, 1)));
 
         assertThat(response.orderId()).isNotNull();
+        assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
         assertThat(response.items()).hasSize(2);
         assertThat(response.total()).isEqualByComparingTo("2019.97"); // 2 x 999.99 + 1 x 19.99
         assertThat(orderRepository.count()).isEqualTo(ordersBefore + 1);
@@ -154,7 +158,83 @@ class OrderServiceIntegrationTest {
         assertThat(stockOf(laptop)).isEqualTo(LAPTOP_STOCK);
     }
 
-    // ---------------------------------------------------------------- helpers
+    // ============================================================ payment
+
+    @Test
+    @DisplayName("Paying a pending order marks it PAID")
+    void payOrder_pending_becomesPaid() {
+        Integer orderId = placeOrder(line(laptop, 1));
+
+        OrderResponse paid = orderService.payOrder(orderId);
+
+        assertThat(paid.status()).isEqualTo(OrderStatus.PAID);
+        assertThat(statusOf(orderId)).isEqualTo(OrderStatus.PAID);
+    }
+
+    @Test
+    @DisplayName("Declined payment rolls the status back to PENDING")
+    void payOrder_declined_rollsBackStatus() {
+        // 11 x 999.99 = 10,999.89, above the simulated limit of 10,000
+        Integer orderId = placeOrder(line(laptop, 11));
+
+        assertThatThrownBy(() -> orderService.payOrder(orderId))
+                .isInstanceOf(PaymentDeclinedException.class);
+
+        // The status WAS set to PAID inside the transaction; the rollback undid it
+        assertThat(statusOf(orderId)).isEqualTo(OrderStatus.PENDING);
+    }
+
+    @Test
+    @DisplayName("Paying an unknown order is rejected")
+    void payOrder_unknownOrder_throwsNotFound() {
+        assertThatThrownBy(() -> orderService.payOrder(MISSING_ID))
+                .isInstanceOf(ResourceNotFoundException.class);
+    }
+
+    // ============================================================ cancellation
+
+    @Test
+    @DisplayName("Cancelling an order returns its stock")
+    void cancelOrder_restoresStock() {
+        Integer orderId = placeOrder(line(laptop, 2), line(mouse, 1));
+        assertThat(stockOf(laptop)).isEqualTo(LAPTOP_STOCK - 2);
+
+        OrderResponse cancelled = orderService.cancelOrder(orderId);
+
+        assertThat(cancelled.status()).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(statusOf(orderId)).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(stockOf(laptop)).isEqualTo(LAPTOP_STOCK);
+        assertThat(stockOf(mouse)).isEqualTo(MOUSE_STOCK);
+    }
+
+    @Test
+    @DisplayName("A paid order can be cancelled and its stock is returned")
+    void cancelOrder_paidOrder_restoresStock() {
+        Integer orderId = placeOrder(line(laptop, 3));
+        orderService.payOrder(orderId);
+
+        orderService.cancelOrder(orderId);
+
+        assertThat(statusOf(orderId)).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(stockOf(laptop)).isEqualTo(LAPTOP_STOCK);
+    }
+
+    @Test
+    @DisplayName("A cancelled order can't be cancelled again or paid; stock is returned only once")
+    void cancelledOrder_rejectsFurtherChanges() {
+        Integer orderId = placeOrder(line(laptop, 2));
+        orderService.cancelOrder(orderId);
+
+        assertThatThrownBy(() -> orderService.cancelOrder(orderId))
+                .isInstanceOf(InvalidOrderStatusException.class);
+        assertThatThrownBy(() -> orderService.payOrder(orderId))
+                .isInstanceOf(InvalidOrderStatusException.class);
+
+        assertThat(statusOf(orderId)).isEqualTo(OrderStatus.CANCELLED);
+        assertThat(stockOf(laptop)).isEqualTo(LAPTOP_STOCK); // not LAPTOP_STOCK + 2
+    }
+
+    // ============================================================ helpers
 
     private Product createProduct(Category category, String name, String price, int stock) {
         Product product = new Product();
@@ -171,9 +251,19 @@ class OrderServiceIntegrationTest {
         return product;
     }
 
+    /** Places an order for the test customer and returns its id. */
+    private Integer placeOrder(OrderItemRequest... lines) {
+        return orderService.placeOrder(request(lines)).orderId();
+    }
+
     /** Reads the stock fresh from the database (no transaction, so no cached entity). */
     private int stockOf(Product product) {
         return inventoryRepository.findById(product.getId()).orElseThrow().getQuantityOnHand();
+    }
+
+    /** Reads the order status fresh from the database. */
+    private OrderStatus statusOf(Integer orderId) {
+        return orderRepository.findById(orderId).orElseThrow().getStatus();
     }
 
     private OrderItemRequest line(Product product, int quantity) {

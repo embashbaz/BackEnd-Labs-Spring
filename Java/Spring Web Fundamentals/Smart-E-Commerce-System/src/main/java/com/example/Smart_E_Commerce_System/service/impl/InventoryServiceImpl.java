@@ -31,4 +31,15 @@ public class InventoryServiceImpl implements InventoryService {
             throw new InsufficientStockException(productId, quantity);
         }
     }
+
+    /** Same rule as reserveStock: only as part of a bigger unit of work (cancelling an order). */
+    @Override
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void releaseStock(Integer productId, int quantity) {
+        int rowsUpdated = inventoryRepository.incrementStock(productId, quantity);
+        if (rowsUpdated == 0) {
+            // Products in orders can't be deleted (ON DELETE RESTRICT), so this means broken data
+            throw new IllegalStateException("No inventory row for product " + productId);
+        }
+    }
 }

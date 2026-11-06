@@ -69,4 +69,20 @@ public class OrderController {
         PageResponse<OrderSummaryResponse> page = orderService.getOrderHistory(userId, pageable);
         return ResponseEntity.ok(ApiResponse.success("Order history retrieved successfully", page));
     }
+
+    @PostMapping("/orders/{id}/pay")
+    @Operation(summary = "Pay for a pending order",
+            description = "Simulated payment; amounts above the limit are declined (402) and the order stays PENDING.")
+    public ResponseEntity<ApiResponse<OrderResponse>> payOrder(@PathVariable Integer id) {
+        OrderResponse order = orderService.payOrder(id);
+        return ResponseEntity.ok(ApiResponse.success("Order paid successfully", order));
+    }
+
+    @PostMapping("/orders/{id}/cancel")
+    @Operation(summary = "Cancel an order",
+            description = "Allowed for PENDING and PAID orders. Returns the items' stock in the same transaction.")
+    public ResponseEntity<ApiResponse<OrderResponse>> cancelOrder(@PathVariable Integer id) {
+        OrderResponse order = orderService.cancelOrder(id);
+        return ResponseEntity.ok(ApiResponse.success("Order cancelled successfully", order));
+    }
 }

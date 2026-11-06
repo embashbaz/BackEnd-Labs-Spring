@@ -1,7 +1,7 @@
 package com.example.Smart_E_Commerce_System.service.impl;
 
 import com.example.Smart_E_Commerce_System.config.CacheNames;
-import com.example.Smart_E_Commerce_System.dto.PageResponse; // ADJUST: your PageResponse package
+import com.example.Smart_E_Commerce_System.dto.PageResponse;
 import com.example.Smart_E_Commerce_System.dto.order.CreateOrderRequest;
 import com.example.Smart_E_Commerce_System.dto.order.OrderItemRequest;
 import com.example.Smart_E_Commerce_System.dto.order.OrderItemResponse;
@@ -13,12 +13,14 @@ import com.example.Smart_E_Commerce_System.entity.OrderItem;
 import com.example.Smart_E_Commerce_System.entity.OrderStatus;
 import com.example.Smart_E_Commerce_System.entity.Product;
 import com.example.Smart_E_Commerce_System.entity.User;
+import com.example.Smart_E_Commerce_System.exception.InvalidOrderStatusException;
 import com.example.Smart_E_Commerce_System.exception.ResourceNotFoundException;
 import com.example.Smart_E_Commerce_System.repository.OrderRepository;
 import com.example.Smart_E_Commerce_System.repository.ProductRepository;
 import com.example.Smart_E_Commerce_System.repository.UserRepository;
 import com.example.Smart_E_Commerce_System.service.InventoryService;
 import com.example.Smart_E_Commerce_System.service.OrderService;
+import com.example.Smart_E_Commerce_System.service.PaymentService;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -27,26 +29,35 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class OrderServiceImpl implements OrderService {
+
+    /** Statuses an order may be in for each action. */
+    private static final Set<OrderStatus> PAYABLE = EnumSet.of(OrderStatus.PENDING);
+    private static final Set<OrderStatus> CANCELLABLE = EnumSet.of(OrderStatus.PENDING, OrderStatus.PAID);
 
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
     private final InventoryService inventoryService;
+    private final PaymentService paymentService;
 
     public OrderServiceImpl(OrderRepository orderRepository,
                             UserRepository userRepository,
                             ProductRepository productRepository,
-                            InventoryService inventoryService) {
+                            InventoryService inventoryService,
+                            PaymentService paymentService) {
         this.orderRepository = orderRepository;
         this.userRepository = userRepository;
         this.productRepository = productRepository;
         this.inventoryService = inventoryService;
+        this.paymentService = paymentService;
     }
 
     /**
@@ -99,13 +110,51 @@ public class OrderServiceImpl implements OrderService {
         return toResponse(saved);
     }
 
+    /**
+     * PENDING -> PAID in one transaction:
+     * 1. Change the status with a conditional UPDATE (only if still PENDING).
+     * 2. Charge the total. If the payment is declined, PaymentDeclinedException rolls the
+     *    status back, so the order stays PENDING and can be paid again later.
+     *
+     * Reports are not evicted: they count every non-cancelled order, so PENDING -> PAID
+     * doesn't change any report result.
+     */
+    @Override
+    @Transactional
+    public OrderResponse payOrder(Integer orderId) {
+        changeStatus(orderId, PAYABLE, OrderStatus.PAID, "paid");
+
+        OrderResponse response = toResponse(loadDetail(orderId));
+        paymentService.charge(orderId, response.total()); // throws -> status change rolled back
+        return response;
+    }
+
+    /**
+     * PENDING or PAID -> CANCELLED in one transaction: the status change and the return of
+     * every item's stock succeed or fail together. (A PAID order would also be refunded
+     * through the payment provider; the simulation has nothing to refund.)
+     *
+     * Reports are evicted: cancelled orders are excluded from revenue and top products,
+     * and returned stock changes the low-stock list.
+     */
+    @Override
+    @Transactional
+    @CacheEvict(cacheNames = CacheNames.REPORTS, allEntries = true)
+    public OrderResponse cancelOrder(Integer orderId) {
+        changeStatus(orderId, CANCELLABLE, OrderStatus.CANCELLED, "cancelled");
+
+        Order order = loadDetail(orderId);
+        for (OrderItem item : order.getItems()) {
+            inventoryService.releaseStock(item.getProduct().getId(), item.getQuantity());
+        }
+        return toResponse(order);
+    }
+
     /** readOnly = true: Hibernate skips checking these entities for changes, which is cheaper. */
     @Override
     @Transactional(readOnly = true)
     public OrderResponse getOrder(Integer orderId) {
-        return orderRepository.findDetailById(orderId)
-                .map(this::toResponse)
-                .orElseThrow(() -> new ResourceNotFoundException("Order",orderId));
+        return toResponse(loadDetail(orderId));
     }
 
     /**
@@ -134,6 +183,28 @@ public class OrderServiceImpl implements OrderService {
                         order.getOrderDate(),
                         order.getStatus()));
         return PageResponse.from(page);
+    }
+
+    /**
+     * Changes the status only if the order is currently in one of the allowed statuses,
+     * in a single UPDATE (same idea as the stock update). If two requests try to cancel the
+     * same order at once, the second one's UPDATE waits for the first to commit, then finds
+     * the status already CANCELLED and changes 0 rows, so stock is never returned twice.
+     *
+     * 0 rows changed means the order doesn't exist (404) or is in the wrong status (409).
+     */
+    private void changeStatus(Integer orderId, Set<OrderStatus> allowedFrom, OrderStatus newStatus, String action) {
+        int rowsUpdated = orderRepository.updateStatusIfCurrentIn(orderId, allowedFrom, newStatus);
+        if (rowsUpdated == 0) {
+            Order order = orderRepository.findById(orderId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
+            throw new InvalidOrderStatusException(orderId, order.getStatus(), action);
+        }
+    }
+
+    private Order loadDetail(Integer orderId) {
+        return orderRepository.findDetailById(orderId)
+                .orElseThrow(() -> new ResourceNotFoundException("Order", orderId));
     }
 
     private OrderResponse toResponse(Order order) {

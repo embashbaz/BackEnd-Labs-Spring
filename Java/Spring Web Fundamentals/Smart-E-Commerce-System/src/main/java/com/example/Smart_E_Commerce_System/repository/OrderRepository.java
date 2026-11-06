@@ -9,10 +9,12 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -84,4 +86,11 @@ public interface OrderRepository extends JpaRepository<Order, Integer> {
             """)
     List<MonthlyRevenue> findMonthlyRevenue(@Param("from") LocalDateTime from,
                                             @Param("to") LocalDateTime to);
+
+    /** Changes the status only if it's currently one of 'allowed'. Returns rows changed (0 or 1). */
+    @Modifying
+    @Query("update Order o set o.status = :newStatus where o.id = :id and o.status in :allowed")
+    int updateStatusIfCurrentIn(@Param("id") Integer id,
+                                @Param("allowed") Collection<OrderStatus> allowed,
+                                @Param("newStatus") OrderStatus newStatus);
 }

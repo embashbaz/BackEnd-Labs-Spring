@@ -35,4 +35,13 @@ public interface InventoryRepository extends JpaRepository<Inventory, Integer> {
             """)
     List<Inventory> findLowStock();
 
+    @Modifying
+    @Query("""
+        update Inventory i
+        set i.quantityOnHand = i.quantityOnHand + :qty,
+            i.updatedAt = local datetime
+        where i.productId = :productId
+        """)
+    int incrementStock(@Param("productId") Integer productId, @Param("qty") int qty);
+
 }
