@@ -13,6 +13,7 @@ import com.example.Smart_E_Commerce_System.exception.BusinessRuleException;
 import com.example.Smart_E_Commerce_System.exception.ResourceNotFoundException;
 import com.example.Smart_E_Commerce_System.repository.CategoryRepository;
 import com.example.Smart_E_Commerce_System.repository.InventoryRepository;
+import com.example.Smart_E_Commerce_System.repository.OrderItemRepository;
 import com.example.Smart_E_Commerce_System.repository.ProductRepository;
 import com.example.Smart_E_Commerce_System.repository.spec.ProductSpecifications;
 import com.example.Smart_E_Commerce_System.service.ProductService;
@@ -22,6 +23,8 @@ import org.springframework.cache.annotation.Caching;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
 
 /**
  * Caching:
@@ -38,13 +41,16 @@ public class ProductServiceImpl implements ProductService {
     private final ProductRepository productRepository;
     private final CategoryRepository categoryRepository;
     private final InventoryRepository inventoryRepository;
+    private final OrderItemRepository orderItemRepository;
 
     public ProductServiceImpl(ProductRepository productRepository,
                               CategoryRepository categoryRepository,
-                              InventoryRepository inventoryRepository) {
+                              InventoryRepository inventoryRepository,
+                              OrderItemRepository orderItemRepository) {
         this.productRepository = productRepository;
         this.categoryRepository = categoryRepository;
         this.inventoryRepository = inventoryRepository;
+        this.orderItemRepository = orderItemRepository;
     }
 
     // A new product has a new id, so nothing in the products cache can be stale.
@@ -84,6 +90,32 @@ public class ProductServiceImpl implements ProductService {
                         .map(ProductResponse::from));
     }
 
+    /**
+     * Derived query: Spring reads findByCategoryNameIgnoreCase as
+     * "products whose category.name equals this value, ignoring case" and generates the join.
+     * Checks the category exists first, so a typo gives 404 instead of an empty page.
+     * Not cached, for the same reason as search: many name/page/sort combinations.
+     */
+    @Override
+    public PageResponse<ProductResponse> getByCategoryName(String categoryName, Pageable pageable) {
+        String name = categoryName.trim();
+        if (!categoryRepository.existsByNameIgnoreCase(name)) {
+            throw new ResourceNotFoundException("Category", name);
+        }
+        return PageResponse.from(
+                productRepository.findByCategoryNameIgnoreCase(name, pageable).map(ProductResponse::from));
+    }
+
+    /** Derived query: findByPriceBetween generates "price BETWEEN :min AND :max" (both inclusive). */
+    @Override
+    public PageResponse<ProductResponse> getByPriceRange(BigDecimal min, BigDecimal max, Pageable pageable) {
+        if (min.compareTo(max) > 0) {
+            throw new BusinessRuleException("min cannot be greater than max");
+        }
+        return PageResponse.from(
+                productRepository.findByPriceBetween(min, max, pageable).map(ProductResponse::from));
+    }
+
     // Remove the old copy; the next getById loads the updated product.
     // Eviction happens only if the method succeeds (a failed update changes nothing).
     @Override
@@ -105,9 +137,14 @@ public class ProductServiceImpl implements ProductService {
             @CacheEvict(cacheNames = CacheNames.REPORTS, allEntries = true)
     })
     public void delete(Integer id) {
+        Product product = findOrThrow(id);
+        // Check first for a clear message; ON DELETE RESTRICT in the DB still guards against
+        // an order being placed for this product between this check and the delete.
+        if (orderItemRepository.existsByProductId(id)) {
+            throw new BusinessRuleException("Cannot delete product " + id + ": it appears in orders");
+        }
         // Inventory row is removed by ON DELETE CASCADE in the DB.
-        // Products already in orders are protected by ON DELETE RESTRICT -> 409 via handler.
-        productRepository.delete(findOrThrow(id));
+        productRepository.delete(product);
         productRepository.flush();
     }
 

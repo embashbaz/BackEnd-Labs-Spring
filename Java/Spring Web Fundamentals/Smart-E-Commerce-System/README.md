@@ -141,6 +141,8 @@ script/
 ├── seed-large-data.sql      Generated dataset for performance testing
 ├── baseline-explain.sql     EXPLAIN ANALYZE of the key queries
 ├── perf-measure.sh          Query plans + endpoint timings, saved under a label
+├── perf-sort-page.sh        Page-depth and sort-column experiment
+├── sort-pagination-explain.sql   EXPLAIN ANALYZE for that experiment
 └── perf-test.sh             REST vs GraphQL comparison
 
 docs/                        Performance reports
@@ -185,6 +187,8 @@ List endpoints return a page inside `data`:
 | POST | `/api/products` | Create a product and its inventory row |
 | GET | `/api/products` | Search, filter, sort and paginate products |
 | GET | `/api/products/{id}` | Get a product (cached) |
+| GET | `/api/products/by-category?name=` | Products in a category, found by category name (derived query) |
+| GET | `/api/products/by-price?min=&max=` | Products in a price range, both bounds inclusive (derived query) |
 | PUT | `/api/products/{id}` | Update a product |
 | DELETE | `/api/products/{id}` | Delete a product (blocked if it appears in orders) |
 | POST | `/api/products/{productId}/reviews` | Add a review (one per user per product) |
@@ -193,6 +197,8 @@ List endpoints return a page inside `data`:
 | POST | `/api/orders` | Place an order: creates the order and removes stock in one transaction |
 | GET | `/api/orders/{id}` | Get an order with its items and total |
 | GET | `/api/orders?status=PAID` | List orders by status (admin) |
+| POST | `/api/orders/{id}/pay` | Pay for a pending order (simulated payment) |
+| POST | `/api/orders/{id}/cancel` | Cancel a pending or paid order and return its stock |
 | GET | `/api/reports/monthly-revenue` | Revenue per month; optional `from`, `to` (`yyyy-MM-dd`, default last 12 months) (cached) |
 | GET | `/api/reports/top-products` | Best-selling products; `limit` 1 to 100, default 10 (cached) |
 | GET | `/api/reports/low-stock` | Products at or below their reorder level (cached) |
@@ -210,6 +216,8 @@ GET /api/products?categoryId=1&minPrice=10&maxPrice=500&name=mouse&page=0&size=1
 ```
 
 Filtering, sorting and paging all run in PostgreSQL through JPA Specifications and `Pageable`, so only the requested page leaves the database.
+
+Two things affect speed (measured in the performance report). Sorting by an indexed column (`id`, or `orderDate` for orders) lets PostgreSQL read rows already in order; sorting by an unindexed one (`price`, `name`) makes it read and sort every row. Deep pages are slower than early ones, because `OFFSET` reads and discards every earlier row: the last page of PAID orders costs about 14 ms in the database against 0.13 ms for the first.
 
 ### Example requests
 
@@ -313,6 +321,8 @@ Spring builds the query from the method name. Used for simple lookups and existe
 | `OrderItemRepository` | `existsByProductId` |
 | `ReviewRepository` | `findByProductId` (paged), `existsByProductIdAndUserId` |
 
+`findByCategoryNameIgnoreCase` and `findByPriceBetween` back the `/api/products/by-category` and `/api/products/by-price` endpoints; `existsByProductId` gives a clear 409 before a product that appears in orders is deleted.
+
 Methods that load related data use `@EntityGraph` to join it into the same SQL query (for example, `findByStatus` loads each order's user), which avoids N+1 queries. Product search also uses JPA Specifications (`ProductRepository` extends `JpaSpecificationExecutor`) to combine optional filters into one `WHERE` clause.
 
 ### JPQL queries (`@Query`)
@@ -384,6 +394,33 @@ where i.productId = :productId and i.quantityOnHand >= :qty
 
 It returns the number of rows changed: 0 means not enough stock, and the service throws `InsufficientStockException` (409). Because the check and the change are one statement, two customers buying the last item at the same time cannot both succeed. Bulk updates skip `@UpdateTimestamp`, so `updatedAt` is set in the query.
 
+### Paying and cancelling orders
+
+Orders move through a small set of statuses. Each change is checked and applied in a single conditional `UPDATE` (`OrderRepository.updateStatusIfCurrentIn`), the same idea as the stock update:
+
+```
+PENDING ──pay──▶ PAID
+   │               │
+   └────cancel─────┴──▶ CANCELLED
+```
+
+| Action | Allowed from | What happens in the transaction | On failure |
+| --- | --- | --- | --- |
+| `payOrder` | `PENDING` | Status set to `PAID`, then the total is charged through `PaymentService` | Payment declined (402): the status change is rolled back and the order stays `PENDING` |
+| `cancelOrder` | `PENDING`, `PAID` | Status set to `CANCELLED`, then each item's stock is returned through `InventoryService.releaseStock` (`MANDATORY`) | Any error rolls back both the status and the stock changes |
+
+Any other move (paying a cancelled order, cancelling twice) changes 0 rows and returns 409. Because the check and the change are one statement, two simultaneous cancel requests can't both succeed: the second one's `UPDATE` waits for the first to commit, then finds the order already cancelled, so stock is never returned twice.
+
+Payment is simulated by `SimulatedPaymentService`, which declines any amount above a configurable limit, giving a repeatable failure case without any card data:
+
+```yaml
+app:
+  payment:
+    max-amount: 10000
+```
+
+A real payment provider is an external call that a database transaction can't undo. A production system would use the provider's idempotency keys and confirm the payment before marking the order paid.
+
 ### Rollback in practice
 
 If an order has two products and the second lacks stock, the first product's stock was already reduced inside the transaction. The exception rolls that back too, and no order row is created. `OrderServiceIntegrationTest` proves this against a real database (see [Testing](#testing)).
@@ -423,7 +460,7 @@ The same names are constants in `config/CacheNames.java`, which the annotations 
 | `categories` | `CategoryService.getById` | category id | Category update or delete (that id) |
 | `categoryLists` | `CategoryService.getAll` | page, size and sort | Any category create, update or delete (all pages) |
 | `users` | `UserService.getById` | user id | User update or delete (that id) |
-| `reports` | All three reports | report name + parameters | Any order placed; any product create, update or delete (all entries) |
+| `reports` | All three reports | report name + parameters | Any order placed or cancelled; any product create, update or delete (all entries) |
 
 All cached values are immutable DTO records, never entities, so a cached object can't trigger lazy loading or be modified by accident. User profiles are cached as `UserResponse`, which contains no password hash. GraphQL queries that call the same service methods share the cache.
 
@@ -453,7 +490,8 @@ Request DTOs are validated with Bean Validation (`@NotBlank`, `@Size`, `@Email`,
 | --- | --- |
 | 400 Bad Request | Validation failures (with a field-by-field error map), malformed JSON, invalid parameters or sort fields, a report `from` date after `to` |
 | 404 Not Found | Resource or endpoint does not exist |
-| 409 Conflict | Duplicate name or email, a delete blocked by related records, not enough stock for an order, a second review of the same product by the same user |
+| 402 Payment Required | The simulated payment was declined; the order stays `PENDING` |
+| 409 Conflict | Duplicate name or email, a delete blocked by related records, not enough stock for an order, a second review of the same product by the same user, an order status change that isn't allowed (such as paying a cancelled order) |
 | 500 Internal Server Error | Unexpected errors (logged with a stack trace, generic message returned) |
 
 Example validation error:
@@ -510,7 +548,7 @@ These endpoints load all products into memory to demonstrate the algorithms. The
 
 ### Automated: transaction tests
 
-`OrderServiceIntegrationTest` starts the full application on the `test` profile (H2) and checks order placement against a real database:
+`OrderServiceIntegrationTest` starts the full application on the `test` profile (H2) and checks order placement, payment and cancellation against a real database (11 tests):
 
 | Test | Proves |
 | --- | --- |
@@ -519,6 +557,12 @@ These endpoints load all products into memory to demonstrate the algorithms. The
 | `placeOrder_unknownUser_throwsNotFound` | A missing user stops the order before anything changes |
 | `placeOrder_unknownProduct_rollsBack` | A missing product also rolls back earlier stock changes |
 | `reserveStock_withoutTransaction_isRejected` | `MANDATORY` propagation refuses a call without a transaction |
+| `payOrder_pending_becomesPaid` | A pending order can be paid |
+| `payOrder_declined_rollsBackStatus` | A declined payment rolls the status back to `PENDING` |
+| `payOrder_unknownOrder_throwsNotFound` | Paying a missing order returns 404 |
+| `cancelOrder_restoresStock` | Cancelling returns every item's stock |
+| `cancelOrder_paidOrder_restoresStock` | A paid order can be cancelled too |
+| `cancelledOrder_rejectsFurtherChanges` | A cancelled order can't be paid or cancelled again, and stock is returned only once |
 
 Run them with:
 
@@ -576,6 +620,21 @@ USER_ID=<id> PRODUCT_ID=<id> ./script/perf-measure.sh after-caching
 
 The script prints the test IDs it picks on the first run; passing them to later runs keeps the comparison fair. Results are saved in `perf-results/`: `endpoint-timings.csv` holds every run, with one row per endpoint per label.
 
+### Sorting and pagination
+
+| Query (database time) | First page | Last page |
+| --- | --- | --- |
+| PAID orders, newest first, with `OFFSET` | 0.13 ms | 14.2 ms |
+| PAID orders, keyset pagination | | 0.21 ms |
+| Products sorted by `id` (indexed) | 0.03 ms | 1.72 ms |
+| Products sorted by `price` (not indexed) | 2.06 ms | 3.85 ms |
+
+`OFFSET` cost grows with the page number, while keyset pagination ("rows after the last one seen") stays constant; sorting by an unindexed column requires reading every row. To reproduce, from the project root with the app running:
+
+```bash
+./script/perf-sort-page.sh
+```
+
 ### REST vs GraphQL
 
 Measured with `script/perf-test.sh` (50 timed requests per scenario after 5 warm-up calls, on localhost):
@@ -605,6 +664,6 @@ To reproduce:
 - **`open-in-view` disabled**, so every database access happens inside `@Transactional` service methods.
 - **Service interfaces with implementations**, so controllers depend on abstractions and implementations can be swapped or mocked.
 - **Read-only summaries return DTOs straight from the query** (JPQL constructor expressions and native-query projections), so reports never load full entities.
-- **Stock is changed with one conditional `UPDATE`**, so overselling is impossible without extra locking.
+- **Stock and order status are changed with one conditional `UPDATE` each**, so overselling, double cancellation and invalid status changes are impossible without extra locking.
 - **Indexes only where a measurement showed a problem**, because each index also slows down writes.
 - **Cache DTOs, not entities, and evict on every change**, so cached data is safe to share and never outlives the data it came from.

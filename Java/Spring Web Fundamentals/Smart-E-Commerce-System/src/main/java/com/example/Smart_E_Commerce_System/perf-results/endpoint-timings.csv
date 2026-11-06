@@ -1,0 +1,9 @@
+run_at,label,endpoint,path,requests,avg_ms,min_ms,p95_ms,max_ms,errors
+2026-11-06T11:10:53,sort-page,orders-page-first,"/api/orders?status=PAID&page=0&size=20",50,5.5,4.8,7.2,7.6,0
+2026-11-06T11:10:53,sort-page,orders-page-middle,"/api/orders?status=PAID&page=500&size=20",50,13.3,8.5,17.4,19.8,0
+2026-11-06T11:10:53,sort-page,orders-page-last,"/api/orders?status=PAID&page=1001&size=20",50,11.5,9.4,15.5,19.9,0
+2026-11-06T11:10:53,sort-page,products-sort-id,"/api/products?page=0&size=20&sort=id",50,3.1,2.7,3.7,3.7,0
+2026-11-06T11:10:53,sort-page,products-sort-price,"/api/products?page=0&size=20&sort=price",50,5.8,5.2,6.5,14.5,0
+2026-11-06T11:10:53,sort-page,products-sort-name,"/api/products?page=0&size=20&sort=name",50,5.1,4.8,5.6,5.7,0
+2026-11-06T11:10:53,sort-page,products-last-page-id,"/api/products?page=250&size=20&sort=id",50,4.3,3.6,4.8,19.7,0
+2026-11-06T11:10:53,sort-page,products-last-page-price,"/api/products?page=250&size=20&sort=price",50,9.1,7.3,11.9,12.0,0

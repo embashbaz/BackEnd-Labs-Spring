@@ -79,6 +79,41 @@ public class ProductController {
         return ResponseEntity.ok(ApiResponse.success("Products retrieved", productService.search(filter, pageable)));
     }
 
+    @GetMapping("/by-category")
+    @Operation(summary = "Products in a category, by category name",
+            description = "Derived query ProductRepository.findByCategoryNameIgnoreCase: Spring builds the SQL "
+                    + "from the method name, joining products to categories. Case-insensitive exact name. "
+                    + "Paginated and sortable, e.g. ?name=Electronics&page=0&size=10&sort=price,asc")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Products in the category"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Missing name or invalid sort property"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "404", description = "No category with that name")
+    })
+    public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> getByCategoryName(
+            @Parameter(description = "Category name (case-insensitive)", example = "Electronics")
+            @RequestParam String name,
+            @ParameterObject @PageableDefault(size = 10, sort = "id") Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.success("Products retrieved",
+                productService.getByCategoryName(name, pageable)));
+    }
+
+    @GetMapping("/by-price")
+    @Operation(summary = "Products in a price range",
+            description = "Derived query ProductRepository.findByPriceBetween (both bounds inclusive). "
+                    + "Paginated and sortable, e.g. ?min=10&max=100&sort=price,asc")
+    @ApiResponses({
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "Products in the range"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "Missing bound or invalid sort property"),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "min greater than max")
+    })
+    public ResponseEntity<ApiResponse<PageResponse<ProductResponse>>> getByPriceRange(
+            @Parameter(description = "Minimum price (inclusive)", example = "10.00") @RequestParam BigDecimal min,
+            @Parameter(description = "Maximum price (inclusive)", example = "100.00") @RequestParam BigDecimal max,
+            @ParameterObject @PageableDefault(size = 10, sort = "id") Pageable pageable) {
+        return ResponseEntity.ok(ApiResponse.success("Products retrieved",
+                productService.getByPriceRange(min, max, pageable)));
+    }
+
     @PutMapping("/{id}")
     @Operation(summary = "Update a product", description = "initialStock is ignored on update")
     @ApiResponses({
